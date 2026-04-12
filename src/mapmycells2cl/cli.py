@@ -74,6 +74,59 @@ def annotate(input_file: Path, output_file: Path | None, mapping_path: Path | No
     click.echo("Done.")
 
 
+@cli.command("annotate-h5ad")
+@click.argument("mmc_csv", type=click.Path(exists=True, path_type=Path))
+@click.argument("h5ad_in", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    "h5ad_out",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output h5ad path. Defaults to <input>_annotated.h5ad.",
+)
+@click.option(
+    "--cxg-level",
+    default="cluster",
+    show_default=True,
+    help="Taxonomy level used for unprefixed CxG cell_type columns.",
+)
+@click.option(
+    "--mapping",
+    "mapping_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to a custom mapping JSON file.",
+)
+def annotate_h5ad_cmd(
+    mmc_csv: Path,
+    h5ad_in: Path,
+    h5ad_out: Path | None,
+    cxg_level: str,
+    mapping_path: Path | None,
+) -> None:
+    """Annotate an h5ad file with CL terms from a MapMyCells CSV.
+
+    MMC_CSV is the MapMyCells CSV output. H5AD_IN is the AnnData file to annotate.
+    """
+    from mapmycells2cl.annotator import annotate_h5ad
+
+    if h5ad_out is None:
+        h5ad_out = h5ad_in.with_name(f"{h5ad_in.stem}_annotated.h5ad")
+
+    try:
+        mapper = CellTypeMapper(mapping_path)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Mapping version: {mapper.mapping_version}")
+    click.echo(f"Annotating {h5ad_in} -> {h5ad_out}")
+
+    annotate_h5ad(mmc_csv, h5ad_in, h5ad_out, mapper, cxg_level=cxg_level)
+    click.echo("Done.")
+
+
 @cli.command("update-mappings")
 @click.option(
     "--owl",

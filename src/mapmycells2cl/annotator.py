@@ -57,6 +57,22 @@ def _level_from_columns(columns: list[str]) -> list[str]:
     return found
 
 
+def _empty_result(mapper: CellTypeMapper) -> MatchResult:
+    """Return a not-found MatchResult for cells absent from the mmc output."""
+    return MatchResult(
+        aba_id="",
+        exact_id="",
+        exact_label="",
+        ontology="",
+        broad=[],
+        best_cl_id="",
+        best_cl_label="",
+        best_cl_ic=0.0,
+        mapping_version=mapper.mapping_version,
+        found=False,
+    )
+
+
 def _cl_columns_for_level(level: str, result: MatchResult) -> dict[str, str]:
     """Build the annotation column dict for one level and one MatchResult.
 
@@ -131,22 +147,7 @@ def annotate_csv(
         extra: dict[str, str] = {}
         for level in levels:
             aba_id = row.get(f"{level}_label", "").strip()
-            result = (
-                mapper.lookup(aba_id)
-                if aba_id
-                else MatchResult(
-                    aba_id="",
-                    exact_id="",
-                    exact_label="",
-                    ontology="",
-                    broad=[],
-                    best_cl_id="",
-                    best_cl_label="",
-                    best_cl_ic=0.0,
-                    mapping_version=mapper.mapping_version,
-                    found=False,
-                )
-            )
+            result = mapper.lookup(aba_id) if aba_id else _empty_result(mapper)
             extra.update(_cl_columns_for_level(level, result))
             if result.found and result.ontology == "PCL":
                 pcl_levels.add(level)
@@ -236,3 +237,104 @@ def annotate_json(
             level_data.update(_cl_json_for_level(result))
 
     output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def annotate_h5ad(
+    mmc_csv_path: Path,
+    h5ad_in_path: Path,
+    h5ad_out_path: Path,
+    mapper: CellTypeMapper,
+    cxg_level: str = "cluster",
+) -> None:
+    """Annotate an h5ad file with CL terms from MapMyCells CSV output.
+
+    Reads ABA taxonomy IDs from the MapMyCells CSV, looks them up, and writes
+    CL annotation columns to ``adata.obs``.
+
+    Two sets of columns are added:
+
+    1. **Unprefixed CxG pair** (required by CELLxGENE schema) sourced from
+       *cxg_level* (default ``"cluster"``):
+       ``cell_type_ontology_term_id``, ``cell_type``.
+
+    2. **Prefixed per-level columns** following the CAP/HCA double-dash
+       convention (see module docstring).
+
+    Args:
+        mmc_csv_path: Path to MapMyCells CSV output (``#`` comment lines ok).
+        h5ad_in_path: Path to input h5ad file.
+        h5ad_out_path: Destination path for annotated h5ad.
+        mapper: Configured :class:`~mapmycells2cl.mapper.CellTypeMapper`.
+        cxg_level: Taxonomy level used for the unprefixed CxG columns.
+    """
+    import anndata as ad
+    import pandas as pd
+
+    # Parse mmc CSV → {cell_id: {level: aba_id}}
+    with open(mmc_csv_path, newline="", encoding="utf-8") as fh:
+        lines = [ln for ln in fh if not ln.startswith("#")]
+    reader = csv.DictReader(lines)
+    if reader.fieldnames is None:
+        raise ValueError(f"CSV has no headers: {mmc_csv_path}")
+    fieldnames = list(reader.fieldnames)
+    mmc_rows: dict[str, dict[str, str]] = {row["cell_id"]: dict(row) for row in reader}
+
+    levels = _level_from_columns(fieldnames)
+
+    # First pass: look up all cells, detect which levels have PCL matches
+    cell_results: dict[str, dict[str, MatchResult]] = {}
+    pcl_levels: set[str] = set()
+    for cell_id, row in mmc_rows.items():
+        level_map: dict[str, MatchResult] = {}
+        for level in levels:
+            aba_id = row.get(f"{level}_label", "").strip()
+            result = mapper.lookup(aba_id) if aba_id else _empty_result(mapper)
+            level_map[level] = result
+            if result.found and result.ontology == "PCL":
+                pcl_levels.add(level)
+        cell_results[cell_id] = level_map
+
+    adata = ad.read_h5ad(h5ad_in_path)
+
+    # Build column lists in obs-index order
+    new_cols: dict[str, list[str]] = {
+        "cell_type_ontology_term_id": [],
+        "cell_type": [],
+    }
+    for level in levels:
+        p = level + _SEP
+        new_cols[f"{p}cell_type_ontology_term_id"] = []
+        new_cols[f"{p}cell_type"] = []
+        if level in pcl_levels:
+            new_cols[f"{p}cell_type_pcl_ontology_term_id"] = []
+            new_cols[f"{p}cell_type_pcl"] = []
+            new_cols[f"{p}cell_type_cl_broad_ontology_term_ids"] = []
+
+    for cell_id in adata.obs.index:
+        lvl_map = cell_results.get(str(cell_id))
+        if lvl_map is None:
+            for lst in new_cols.values():
+                lst.append("")
+            continue
+
+        cxg = lvl_map.get(cxg_level, _empty_result(mapper))
+        new_cols["cell_type_ontology_term_id"].append(cxg.best_cl_id if cxg.found else "")
+        new_cols["cell_type"].append(cxg.best_cl_label if cxg.found else "")
+
+        for level in levels:
+            p = level + _SEP
+            r = lvl_map[level]
+            new_cols[f"{p}cell_type_ontology_term_id"].append(r.best_cl_id if r.found else "")
+            new_cols[f"{p}cell_type"].append(r.best_cl_label if r.found else "")
+            if level in pcl_levels:
+                is_pcl = r.found and r.ontology == "PCL"
+                new_cols[f"{p}cell_type_pcl_ontology_term_id"].append(r.exact_id if is_pcl else "")
+                new_cols[f"{p}cell_type_pcl"].append(r.exact_label if is_pcl else "")
+                new_cols[f"{p}cell_type_cl_broad_ontology_term_ids"].append(
+                    "|".join(b.id for b in r.broad) if is_pcl else ""
+                )
+
+    for col, values in new_cols.items():
+        adata.obs[col] = pd.Categorical(values)
+
+    adata.write_h5ad(h5ad_out_path)

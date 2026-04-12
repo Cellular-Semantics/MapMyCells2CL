@@ -4,9 +4,12 @@ import json
 import textwrap
 from pathlib import Path
 
+import anndata as ad
+import numpy as np
+import pandas as pd
 import pytest
 
-from mapmycells2cl.annotator import annotate_csv_string, annotate_json
+from mapmycells2cl.annotator import annotate_csv_string, annotate_h5ad, annotate_json
 from mapmycells2cl.mapper import CellTypeMapper
 from mapmycells2cl.parser import build_mapping_from_string
 
@@ -157,3 +160,86 @@ def test_json_unknown_id(tmp_path: Path, mapper: CellTypeMapper) -> None:
     cluster = json.loads(out_p.read_text())["results"][0]["assignment"]["cluster"]
     assert cluster["cell_type_ontology_term_id"] == ""
     assert "cell_type_pcl_ontology_term_id" not in cluster
+
+
+# ---------------------------------------------------------------------------
+# h5ad annotation
+# ---------------------------------------------------------------------------
+
+
+def _make_h5ad(tmp_path: Path, cell_ids: list[str]) -> Path:
+    """Write a minimal h5ad with given cell IDs and a dummy gene."""
+    adata = ad.AnnData(
+        X=np.zeros((len(cell_ids), 1), dtype=np.float32),
+        obs=pd.DataFrame(index=cell_ids),
+        var=pd.DataFrame(index=["gene1"]),
+    )
+    path = tmp_path / "input.h5ad"
+    adata.write_h5ad(path)
+    return path
+
+
+def _make_mmc_csv(tmp_path: Path, rows: list[tuple[str, str, str]]) -> Path:
+    """Write a minimal mmc CSV. rows = [(cell_id, subclass_label, cluster_label)]."""
+    path = tmp_path / "mmc.csv"
+    lines = ["# comment\n", "cell_id,subclass_label,cluster_label\n"]
+    for cell_id, sub, clu in rows:
+        lines.append(f"{cell_id},{sub},{clu}\n")
+    path.write_text("".join(lines))
+    return path
+
+
+@pytest.mark.unit
+def test_h5ad_cxg_columns(tmp_path: Path, mapper: CellTypeMapper) -> None:
+    """Unprefixed CxG columns written from cluster level."""
+    h5ad_in = _make_h5ad(tmp_path, ["cell1"])
+    mmc_csv = _make_mmc_csv(tmp_path, [("cell1", "CS20230722_SUBC_313", "CS20230722_SUBC_313")])
+    h5ad_out = tmp_path / "out.h5ad"
+
+    annotate_h5ad(mmc_csv, h5ad_in, h5ad_out, mapper)
+
+    obs = ad.read_h5ad(h5ad_out).obs
+    assert obs.loc["cell1", "cell_type_ontology_term_id"] == "CL:4300353"
+    assert obs.loc["cell1", "cell_type"] == "Purkinje cell (Mmus)"
+
+
+@pytest.mark.unit
+def test_h5ad_prefixed_columns_cl_exact(tmp_path: Path, mapper: CellTypeMapper) -> None:
+    """Prefixed columns written; no PCL columns for CL exact match."""
+    h5ad_in = _make_h5ad(tmp_path, ["cell1"])
+    mmc_csv = _make_mmc_csv(tmp_path, [("cell1", "CS20230722_SUBC_313", "CS20230722_SUBC_313")])
+    h5ad_out = tmp_path / "out.h5ad"
+
+    annotate_h5ad(mmc_csv, h5ad_in, h5ad_out, mapper)
+
+    obs = ad.read_h5ad(h5ad_out).obs
+    assert obs.loc["cell1", "cluster--cell_type_ontology_term_id"] == "CL:4300353"
+    assert "cluster--cell_type_pcl_ontology_term_id" not in obs.columns
+
+
+@pytest.mark.unit
+def test_h5ad_prefixed_columns_pcl_exact(tmp_path: Path, mapper: CellTypeMapper) -> None:
+    """PCL columns present when cluster level is PCL exact."""
+    h5ad_in = _make_h5ad(tmp_path, ["cell1"])
+    mmc_csv = _make_mmc_csv(tmp_path, [("cell1", "CS20230722_SUBC_313", "CS20230722_CLUS_0002")])
+    h5ad_out = tmp_path / "out.h5ad"
+
+    annotate_h5ad(mmc_csv, h5ad_in, h5ad_out, mapper)
+
+    obs = ad.read_h5ad(h5ad_out).obs
+    assert obs.loc["cell1", "cell_type_ontology_term_id"] == "CL:4300353"
+    assert obs.loc["cell1", "cluster--cell_type_pcl_ontology_term_id"] == "PCL:0010002"
+    assert "CL:4300353" in obs.loc["cell1", "cluster--cell_type_cl_broad_ontology_term_ids"]
+
+
+@pytest.mark.unit
+def test_h5ad_unknown_cell_in_mmc(tmp_path: Path, mapper: CellTypeMapper) -> None:
+    """Cells absent from mmc CSV get empty strings."""
+    h5ad_in = _make_h5ad(tmp_path, ["cell1", "cell_missing"])
+    mmc_csv = _make_mmc_csv(tmp_path, [("cell1", "CS20230722_SUBC_313", "CS20230722_SUBC_313")])
+    h5ad_out = tmp_path / "out.h5ad"
+
+    annotate_h5ad(mmc_csv, h5ad_in, h5ad_out, mapper)
+
+    obs = ad.read_h5ad(h5ad_out).obs
+    assert obs.loc["cell_missing", "cell_type_ontology_term_id"] == ""
