@@ -7,11 +7,8 @@ from mapmycells2cl.parser import build_mapping_from_string
 
 @pytest.mark.unit
 def test_exact_cl_match(minimal_owl_xml: str) -> None:
-    """CL exact match is extracted correctly."""
     mapping = build_mapping_from_string(minimal_owl_xml)
-    exact = mapping["exact"]
-    assert "CS20230722_SUBC_313" in exact
-    entry = exact["CS20230722_SUBC_313"]
+    entry = mapping["exact"]["CS20230722_SUBC_313"]
     assert entry["id"] == "CL:4300353"
     assert entry["ontology"] == "CL"
     assert entry["label"] == "Purkinje cell (Mmus)"
@@ -19,64 +16,88 @@ def test_exact_cl_match(minimal_owl_xml: str) -> None:
 
 @pytest.mark.unit
 def test_exact_pcl_match(minimal_owl_xml: str) -> None:
-    """PCL exact match is extracted correctly."""
-    mapping = build_mapping_from_string(minimal_owl_xml)
-    exact = mapping["exact"]
-    assert "CS20230722_CLUS_0001" in exact
-    entry = exact["CS20230722_CLUS_0001"]
+    entry = build_mapping_from_string(minimal_owl_xml)["exact"]["CS20230722_CLUS_0001"]
     assert entry["id"] == "PCL:0010001"
     assert entry["ontology"] == "PCL"
 
 
 @pytest.mark.unit
 def test_broad_via_subclass(minimal_owl_xml: str) -> None:
-    """PCL term with subClassOf CL gets a broad match."""
-    mapping = build_mapping_from_string(minimal_owl_xml)
-    broad = mapping["broad"]
-    # CS20230722_CLUS_0002 maps to PCL:0010002 which is subClassOf CL:4300353
+    broad = build_mapping_from_string(minimal_owl_xml)["broad"]
     assert "CS20230722_CLUS_0002" in broad
-    matches = broad["CS20230722_CLUS_0002"]
-    assert any(m["id"] == "CL:4300353" for m in matches)
+    assert any(m["id"] == "CL:4300353" for m in broad["CS20230722_CLUS_0002"])
 
 
 @pytest.mark.unit
 def test_broad_via_individual_hierarchy(minimal_owl_xml: str) -> None:
-    """ABA ID without subClassOf uses individual hierarchy for broad match."""
-    mapping = build_mapping_from_string(minimal_owl_xml)
-    broad = mapping["broad"]
-    # CS20230722_CLUS_0003 has no exact match but its parent SUBC_313 -> CL:4300353
+    broad = build_mapping_from_string(minimal_owl_xml)["broad"]
     assert "CS20230722_CLUS_0003" in broad
-    matches = broad["CS20230722_CLUS_0003"]
-    assert any(m["id"] == "CL:4300353" for m in matches)
-
-
-@pytest.mark.unit
-def test_version_extracted(minimal_owl_xml: str) -> None:
-    """Ontology version is extracted from owl:versionInfo."""
-    mapping = build_mapping_from_string(minimal_owl_xml)
-    assert mapping["version"] == "2026-03-26"
-
-
-@pytest.mark.unit
-def test_no_broad_for_cl_exact(minimal_owl_xml: str) -> None:
-    """CL exact matches do not appear in the broad map."""
-    mapping = build_mapping_from_string(minimal_owl_xml)
-    # CS20230722_SUBC_313 is a CL exact — broad map should not have it
-    assert "CS20230722_SUBC_313" not in mapping["broad"]
-
-
-@pytest.mark.unit
-def test_mapping_has_required_keys(minimal_owl_xml: str) -> None:
-    """Output dict has all required top-level keys."""
-    mapping = build_mapping_from_string(minimal_owl_xml)
-    assert {"version", "source", "generated", "exact", "broad"} <= mapping.keys()
+    assert any(m["id"] == "CL:4300353" for m in broad["CS20230722_CLUS_0003"])
 
 
 @pytest.mark.unit
 def test_two_hop_broad_via_individual(minimal_owl_xml: str) -> None:
-    """CLUS_0004 -> CLUS_0003 -> SUBC_313 gives broad match via two hops."""
-    mapping = build_mapping_from_string(minimal_owl_xml)
-    broad = mapping["broad"]
+    broad = build_mapping_from_string(minimal_owl_xml)["broad"]
     assert "CS20230722_CLUS_0004" in broad
-    matches = broad["CS20230722_CLUS_0004"]
-    assert any(m["id"] == "CL:4300353" for m in matches)
+    assert any(m["id"] == "CL:4300353" for m in broad["CS20230722_CLUS_0004"])
+
+
+@pytest.mark.unit
+def test_version_extracted(minimal_owl_xml: str) -> None:
+    assert build_mapping_from_string(minimal_owl_xml)["version"] == "2026-03-26"
+
+
+@pytest.mark.unit
+def test_no_broad_for_cl_exact(minimal_owl_xml: str) -> None:
+    assert "CS20230722_SUBC_313" not in build_mapping_from_string(minimal_owl_xml)["broad"]
+
+
+@pytest.mark.unit
+def test_mapping_has_required_keys(minimal_owl_xml: str) -> None:
+    assert {"version", "source", "generated", "exact", "broad"} <= build_mapping_from_string(
+        minimal_owl_xml
+    ).keys()
+
+
+# ---------------------------------------------------------------------------
+# IC / best_cl tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_best_cl_absent_without_cl_owl(minimal_owl_xml: str) -> None:
+    """best_cl section absent when no cl.owl supplied."""
+    assert "best_cl" not in build_mapping_from_string(minimal_owl_xml)
+
+
+@pytest.mark.unit
+def test_best_cl_present_with_cl_owl(minimal_owl_xml: str, minimal_cl_owl_xml: str) -> None:
+    """best_cl section present when cl.owl supplied."""
+    mapping = build_mapping_from_string(minimal_owl_xml, cl_owl_xml=minimal_cl_owl_xml)
+    assert "best_cl" in mapping
+
+
+@pytest.mark.unit
+def test_best_cl_for_cl_exact(minimal_owl_xml: str, minimal_cl_owl_xml: str) -> None:
+    """CL exact match: best_cl equals the exact match itself."""
+    mapping = build_mapping_from_string(minimal_owl_xml, cl_owl_xml=minimal_cl_owl_xml)
+    best = mapping["best_cl"]["CS20230722_SUBC_313"]
+    assert best["id"] == "CL:4300353"
+    assert best["ic"] >= 0  # 0.0 is valid when fixture has a single leaf
+
+
+@pytest.mark.unit
+def test_best_cl_for_pcl_exact(minimal_owl_xml: str, minimal_cl_owl_xml: str) -> None:
+    """PCL exact match with CL broad: best_cl is the CL broad match."""
+    mapping = build_mapping_from_string(minimal_owl_xml, cl_owl_xml=minimal_cl_owl_xml)
+    best = mapping["best_cl"]["CS20230722_CLUS_0002"]
+    assert best["id"] == "CL:4300353"
+    assert best["ic"] >= 0
+
+
+@pytest.mark.unit
+def test_ic_score_is_non_negative(minimal_owl_xml: str, minimal_cl_owl_xml: str) -> None:
+    """All IC scores in best_cl are non-negative."""
+    mapping = build_mapping_from_string(minimal_owl_xml, cl_owl_xml=minimal_cl_owl_xml)
+    for entry in mapping["best_cl"].values():
+        assert entry["ic"] >= 0

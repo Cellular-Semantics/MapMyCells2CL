@@ -3,7 +3,7 @@ name = "mapmycells2cl"
 version = "0.1.0"
 description = "Map MapMyCells ABA taxonomy IDs to Cell Ontology (CL) terms"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 license = { text = "MIT" }
 keywords = ["cell-ontology", "mapmycells", "allen-brain-atlas", "single-cell"]
 dependencies = [
@@ -37,7 +37,7 @@ markers = [
 ]
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.13"
 strict = true
 files = ["src/mapmycells2cl"]
 

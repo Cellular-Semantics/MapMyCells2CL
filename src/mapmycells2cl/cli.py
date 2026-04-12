@@ -26,10 +26,21 @@ def cli() -> None:
 
 @cli.command()
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
-@click.option("-o", "--output", "output_file", type=click.Path(path_type=Path), default=None,
-              help="Output file path. Defaults to <input>_annotated.<ext>.")
-@click.option("--mapping", "mapping_path", type=click.Path(exists=True, path_type=Path),
-              default=None, help="Path to a custom mapping JSON file.")
+@click.option(
+    "-o",
+    "--output",
+    "output_file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output file path. Defaults to <input>_annotated.<ext>.",
+)
+@click.option(
+    "--mapping",
+    "mapping_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to a custom mapping JSON file.",
+)
 def annotate(input_file: Path, output_file: Path | None, mapping_path: Path | None) -> None:
     """Annotate a MapMyCells CSV or JSON file with CL terms.
 
@@ -64,26 +75,58 @@ def annotate(input_file: Path, output_file: Path | None, mapping_path: Path | No
 
 
 @cli.command("update-mappings")
-@click.option("--owl", "owl_path", type=click.Path(path_type=Path), default=None,
-              help="Path to a local pcl.owl. Downloads from PURL if omitted.")
-@click.option("--output", "output_path", type=click.Path(path_type=Path), default=None,
-              help="Output path for mapping JSON. Defaults to bundled data/mapping.json.")
-def update_mappings(owl_path: Path | None, output_path: Path | None) -> None:
-    """Download latest pcl.owl and regenerate the bundled mapping JSON."""
+@click.option(
+    "--owl",
+    "owl_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to a local pcl.owl. Downloads from PURL if omitted.",
+)
+@click.option(
+    "--cl-owl",
+    "cl_owl_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to base cl.owl for IC computation. Downloads if omitted.",
+)
+@click.option(
+    "--output",
+    "output_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output path for mapping JSON. Defaults to bundled data/mapping.json.",
+)
+def update_mappings(
+    owl_path: Path | None,
+    cl_owl_path: Path | None,
+    output_path: Path | None,
+) -> None:
+    """Download latest pcl.owl + cl.owl and regenerate the bundled mapping JSON.
+
+    IC-ranked best_cl data is included when cl.owl is available (recommended).
+    """
+    import urllib.request
+
     from mapmycells2cl.parser import build_mapping, save_mapping
 
-    if owl_path is None:
-        import urllib.request
-
-        pcl_url = "http://purl.obolibrary.org/obo/pcl.owl"
-        cache = Path("pcl.owl")
-        click.echo(f"Downloading {pcl_url} ...")
+    def _download(url: str, dest: Path) -> None:
+        click.echo(f"Downloading {url} ...")
         try:
-            urllib.request.urlretrieve(pcl_url, cache)  # noqa: S310
+            urllib.request.urlretrieve(url, dest)  # noqa: S310
         except Exception as exc:
-            click.echo(f"Error downloading pcl.owl: {exc}", err=True)
+            click.echo(f"Error downloading {url}: {exc}", err=True)
             sys.exit(1)
-        owl_path = cache
+
+    if owl_path is None:
+        owl_path = Path("pcl.owl")
+        _download("http://purl.obolibrary.org/obo/pcl.owl", owl_path)
+
+    if cl_owl_path is None:
+        cl_owl_path = Path("cl.owl")
+        if not cl_owl_path.exists():
+            _download("http://purl.obolibrary.org/obo/cl.owl", cl_owl_path)
+        else:
+            click.echo(f"Using existing {cl_owl_path}")
 
     if output_path is None:
         output_path = Path(__file__).parent / "data" / "mapping.json"
@@ -91,10 +134,12 @@ def update_mappings(owl_path: Path | None, output_path: Path | None) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     click.echo(f"Parsing {owl_path} ...")
-    mapping = build_mapping(owl_path)
+    mapping = build_mapping(owl_path, cl_owl_path=cl_owl_path)
+    n_best = len(mapping.get("best_cl", {}))
     click.echo(
-        f"  Extracted {len(mapping['exact'])} exact matches, "
-        f"{len(mapping['broad'])} broad matches (version: {mapping['version']})"
+        f"  Extracted {len(mapping['exact'])} exact, "
+        f"{len(mapping['broad'])} broad, "
+        f"{n_best} best_cl entries (version: {mapping['version']})"
     )
 
     save_mapping(mapping, output_path)

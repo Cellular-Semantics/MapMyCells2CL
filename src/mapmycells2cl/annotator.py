@@ -3,16 +3,24 @@
 Reads MapMyCells output files and adds CL annotation columns/fields for
 each taxonomy level present in the data.
 
-**CSV format** — expects columns like ``{level}_label`` (e.g.
-``cluster_label``) containing ABA taxonomy IDs.  Adds:
+**Field naming schema** (CAP/HCA double-dash convention for multi-level):
 
-- ``{level}_cl_exact`` — exact CL/PCL CURIE
-- ``{level}_cl_label`` — human-readable label
-- ``{level}_cl_broad`` — ``|``-joined CL broad-match CURIEs (empty if exact is CL)
+For each taxonomy level (class, subclass, supertype, cluster) the following
+columns are written to the output, prefixed with ``{level}--``:
 
-**JSON format** — expects a ``results`` list where each item has per-level
-``assignment`` dicts containing a ``"label"`` key with the ABA taxonomy ID.
-Adds ``cl_exact``, ``cl_label``, ``cl_broad`` keys to each assignment dict.
+- ``{level}--cell_type_ontology_term_id`` — Most specific CL CURIE (IC-ranked best). Always.
+- ``{level}--cell_type`` — Label for the above. Always.
+- ``{level}--cell_type_pcl_ontology_term_id`` — PCL exact match CURIE. PCL exact only.
+- ``{level}--cell_type_pcl`` — PCL exact label. PCL exact only.
+- ``{level}--cell_type_cl_broad_ontology_term_ids`` — All CL broad CURIEs, ``|``-joined.
+  PCL exact only.
+
+For JSON output the same keys (without prefix) are written inside each
+level's assignment dict; the prefix is the dict key itself.
+
+For h5ad output (Phase 5) the unprefixed CxG pair
+``cell_type_ontology_term_id`` / ``cell_type`` is written to ``obs`` using
+the cluster-level best CL, alongside all prefixed per-level columns.
 """
 
 from __future__ import annotations
@@ -22,20 +30,23 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mapmycells2cl.mapper import CellTypeMapper
+from mapmycells2cl.mapper import CellTypeMapper, MatchResult
 
-# Taxonomy levels produced by MapMyCells (in hierarchy order)
+# Taxonomy levels produced by MapMyCells (hierarchy order, coarsest first)
 TAXONOMY_LEVELS = ("class", "subclass", "supertype", "cluster")
+
+# CAP/HCA double-dash separator
+_SEP = "--"
 
 
 def _level_from_columns(columns: list[str]) -> list[str]:
-    """Detect taxonomy levels present in CSV columns.
+    """Detect taxonomy levels present in CSV columns (via ``{level}_label``).
 
     Args:
         columns: List of CSV column headers.
 
     Returns:
-        Ordered list of detected level names.
+        Ordered list of detected level names (e.g. ``["class", "subclass"]``).
     """
     found = []
     for col in columns:
@@ -46,6 +57,49 @@ def _level_from_columns(columns: list[str]) -> list[str]:
     return found
 
 
+def _cl_columns_for_level(level: str, result: MatchResult) -> dict[str, str]:
+    """Build the annotation column dict for one level and one MatchResult.
+
+    Args:
+        level: Taxonomy level name, e.g. ``"cluster"``.
+        result: Lookup result for this cell at this level.
+
+    Returns:
+        Dict of ``{column_name: value}`` ready to merge into the output row.
+    """
+    prefix = level + _SEP
+    cols: dict[str, str] = {
+        f"{prefix}cell_type_ontology_term_id": result.best_cl_id if result.found else "",
+        f"{prefix}cell_type": result.best_cl_label if result.found else "",
+    }
+    # PCL-specific fields — only when exact match is PCL
+    if result.found and result.ontology == "PCL":
+        cols[f"{prefix}cell_type_pcl_ontology_term_id"] = result.exact_id
+        cols[f"{prefix}cell_type_pcl"] = result.exact_label
+        cols[f"{prefix}cell_type_cl_broad_ontology_term_ids"] = "|".join(b.id for b in result.broad)
+    return cols
+
+
+def _cl_json_for_level(result: MatchResult) -> dict[str, Any]:
+    """Build the annotation dict for one level in JSON output.
+
+    Args:
+        result: Lookup result for this cell at this level.
+
+    Returns:
+        Dict of annotation keys to merge into the level's assignment dict.
+    """
+    out: dict[str, Any] = {
+        "cell_type_ontology_term_id": result.best_cl_id if result.found else "",
+        "cell_type": result.best_cl_label if result.found else "",
+    }
+    if result.found and result.ontology == "PCL":
+        out["cell_type_pcl_ontology_term_id"] = result.exact_id
+        out["cell_type_pcl"] = result.exact_label
+        out["cell_type_cl_broad_ontology_term_ids"] = [b.id for b in result.broad]
+    return out
+
+
 def annotate_csv(
     input_path: Path,
     output_path: Path,
@@ -54,7 +108,7 @@ def annotate_csv(
     """Annotate a MapMyCells CSV file with CL terms.
 
     Args:
-        input_path: Path to input MapMyCells CSV.
+        input_path: Path to input MapMyCells CSV (``#`` comment lines allowed).
         output_path: Destination path for annotated CSV.
         mapper: Configured :class:`~mapmycells2cl.mapper.CellTypeMapper`.
     """
@@ -70,39 +124,55 @@ def annotate_csv(
 
     levels = _level_from_columns(fieldnames)
 
-    # Build output fieldnames: insert CL columns after each existing level block
+    # Annotate all rows first so we know which PCL-conditional columns appear
+    annotated: list[dict[str, str]] = []
+    pcl_levels: set[str] = set()
+    for row in rows:
+        extra: dict[str, str] = {}
+        for level in levels:
+            aba_id = row.get(f"{level}_label", "").strip()
+            result = (
+                mapper.lookup(aba_id)
+                if aba_id
+                else MatchResult(
+                    aba_id="",
+                    exact_id="",
+                    exact_label="",
+                    ontology="",
+                    broad=[],
+                    best_cl_id="",
+                    best_cl_label="",
+                    best_cl_ic=0.0,
+                    mapping_version=mapper.mapping_version,
+                    found=False,
+                )
+            )
+            extra.update(_cl_columns_for_level(level, result))
+            if result.found and result.ontology == "PCL":
+                pcl_levels.add(level)
+        annotated.append({**row, **extra})
+
+    # Build ordered output fieldnames: insert CL columns after each level's label
     out_fields: list[str] = []
-    emitted_cl: set[str] = set()
+    emitted: set[str] = set()
     for col in fieldnames:
         out_fields.append(col)
         for level in levels:
-            cl_exact_col = f"{level}_cl_exact"
-            if col == f"{level}_label" and cl_exact_col not in emitted_cl:
-                out_fields.append(cl_exact_col)
-                out_fields.append(f"{level}_cl_label")
-                out_fields.append(f"{level}_cl_broad")
-                emitted_cl.add(cl_exact_col)
-
-    for row in rows:
-        for level in levels:
-            label_col = f"{level}_label"
-            aba_id = row.get(label_col, "").strip()
-            if aba_id:
-                result = mapper.lookup(aba_id)
-                row[f"{level}_cl_exact"] = result.exact_id if result.found else ""
-                row[f"{level}_cl_label"] = result.exact_label if result.found else ""
-                row[f"{level}_cl_broad"] = (
-                    "|".join(b.id for b in result.broad) if result.found else ""
-                )
-            else:
-                row[f"{level}_cl_exact"] = ""
-                row[f"{level}_cl_label"] = ""
-                row[f"{level}_cl_broad"] = ""
+            if col != f"{level}_label" or level in emitted:
+                continue
+            emitted.add(level)
+            prefix = level + _SEP
+            out_fields.append(f"{prefix}cell_type_ontology_term_id")
+            out_fields.append(f"{prefix}cell_type")
+            if level in pcl_levels:
+                out_fields.append(f"{prefix}cell_type_pcl_ontology_term_id")
+                out_fields.append(f"{prefix}cell_type_pcl")
+                out_fields.append(f"{prefix}cell_type_cl_broad_ontology_term_ids")
 
     with open(output_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=out_fields, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(annotated)
 
 
 def annotate_csv_string(text: str, mapper: CellTypeMapper) -> str:
@@ -163,13 +233,6 @@ def annotate_json(
             if not aba_id:
                 continue
             result = mapper.lookup(aba_id)
-            if result.found:
-                level_data["cl_exact"] = result.exact_id
-                level_data["cl_label"] = result.exact_label
-                level_data["cl_broad"] = [b.id for b in result.broad]
-            else:
-                level_data["cl_exact"] = ""
-                level_data["cl_label"] = ""
-                level_data["cl_broad"] = []
+            level_data.update(_cl_json_for_level(result))
 
     output_path.write_text(json.dumps(data, indent=2), encoding="utf-8")

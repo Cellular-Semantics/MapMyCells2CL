@@ -41,6 +41,12 @@ class MatchResult:
         exact_label: Human-readable label for the exact match.
         ontology: ``"CL"`` or ``"PCL"``.
         broad: CL broad matches (empty when exact match is already CL).
+        best_cl_id: Most specific CL CURIE (IC-ranked). Equal to ``exact_id``
+            when exact is CL; highest-IC broad match when exact is PCL.
+            Empty string when mapping was generated without IC data.
+        best_cl_label: Label for ``best_cl_id``.
+        best_cl_ic: Information Content score for ``best_cl_id`` (0.0 when
+            IC data is absent from the mapping).
         mapping_version: Version of the mapping data used.
         found: ``False`` when the ABA ID had no entry in the mapping.
     """
@@ -50,6 +56,9 @@ class MatchResult:
     exact_label: str
     ontology: str
     broad: list[BroadMatch]
+    best_cl_id: str
+    best_cl_label: str
+    best_cl_ic: float
     mapping_version: str
     found: bool = True
 
@@ -67,7 +76,7 @@ class CellTypeMapper:
 
             mapper = CellTypeMapper()
             result = mapper.lookup("CS20230722_SUBC_313")
-            print(result.exact_id)   # CL:4300353
+            print(result.best_cl_id)   # CL:4300353
     """
 
     def __init__(self, mapping_path: Path | None = None) -> None:
@@ -80,12 +89,28 @@ class CellTypeMapper:
         raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         self._version: str = raw.get("version", "unknown")
         self._exact: dict[str, dict[str, str]] = raw.get("exact", {})
-        self._broad: dict[str, list[dict[str, str | list[str]]]] = raw.get("broad", {})
+        self._broad: dict[str, list[dict[str, Any]]] = raw.get("broad", {})
+        self._best_cl: dict[str, dict[str, Any]] = raw.get("best_cl", {})
+
+        if not self._best_cl:
+            import warnings
+
+            warnings.warn(
+                "Mapping file has no 'best_cl' data. "
+                "Regenerate with `mapmycells2cl update-mappings --cl-owl cl.owl` "
+                "to enable cell_type_ontology_term_id output.",
+                stacklevel=2,
+            )
 
     @property
     def mapping_version(self) -> str:
         """Version string from the mapping file (e.g. ``"2026-03-26"``)."""
         return self._version
+
+    @property
+    def has_ic(self) -> bool:
+        """True when the mapping includes IC-ranked best_cl data."""
+        return bool(self._best_cl)
 
     def lookup(self, aba_id: str) -> MatchResult:
         """Look up a single ABA taxonomy ID.
@@ -104,6 +129,9 @@ class CellTypeMapper:
                 exact_label="",
                 ontology="",
                 broad=[],
+                best_cl_id="",
+                best_cl_label="",
+                best_cl_ic=0.0,
                 mapping_version=self._version,
                 found=False,
             )
@@ -118,12 +146,17 @@ class CellTypeMapper:
             for b in broad_raw
         ]
 
+        best = self._best_cl.get(aba_id, {})
+
         return MatchResult(
             aba_id=aba_id,
             exact_id=str(exact_entry["id"]),
             exact_label=str(exact_entry.get("label", "")),
             ontology=str(exact_entry.get("ontology", "")),
             broad=broad,
+            best_cl_id=str(best.get("id", "")),
+            best_cl_label=str(best.get("label", "")),
+            best_cl_ic=float(best.get("ic", 0.0)),
             mapping_version=self._version,
         )
 
@@ -151,6 +184,7 @@ class CellTypeMapper:
             :class:`CellTypeMapper` instance.
         """
         import tempfile
+        import warnings
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False, encoding="utf-8"
@@ -159,7 +193,9 @@ class CellTypeMapper:
             tmp_path = Path(tf.name)
 
         try:
-            instance = cls(mapping_path=tmp_path)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                instance = cls(mapping_path=tmp_path)
         finally:
             tmp_path.unlink(missing_ok=True)
 

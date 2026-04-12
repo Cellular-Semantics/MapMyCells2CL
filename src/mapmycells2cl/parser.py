@@ -16,12 +16,19 @@ Parses the Provisional Cell Ontology OWL file using streaming regex to extract:
 
 5. **Broad matches** — PCL-only exact matches are walked up the ``subClassOf``
    hierarchy (and individual hierarchy as fallback) to find the nearest CL ancestor.
+
+6. **IC-ranked best CL** — When ``cl_owl_path`` is supplied to
+   :func:`build_mapping`, structure-based Information Content is computed over
+   the base CL graph (no imports) and used to select the single most-specific
+   CL term for each ABA ID.  Stored in the ``best_cl`` section of the output.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
+from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -65,31 +72,25 @@ def _is_aba(uri: str) -> bool:
 _CLASS_START = re.compile(
     r'<owl:Class rdf:about="(http://purl\.obolibrary\.org/obo/(?:CL|PCL)_\d+)">'
 )
-_IND_START = re.compile(
-    r'<owl:NamedIndividual rdf:about="(https://purl\.brain-bican\.org/[^"]+)">'
-)
-_EQUIV_RO = re.compile(
-    r'<owl:onProperty rdf:resource="[^"]*RO_0015001"/>'
-)
-_HAS_VALUE = re.compile(
-    r'<owl:hasValue rdf:resource="(https://purl\.brain-bican\.org/[^"]+)"/>'
-)
+_IND_START = re.compile(r'<owl:NamedIndividual rdf:about="(https://purl\.brain-bican\.org/[^"]+)">')
+_EQUIV_RO = re.compile(r'<owl:onProperty rdf:resource="[^"]*RO_0015001"/>')
+_HAS_VALUE = re.compile(r'<owl:hasValue rdf:resource="(https://purl\.brain-bican\.org/[^"]+)"/>')
 _LABEL = re.compile(r"<rdfs:label[^>]*>([^<]+)</rdfs:label>")
 _SUBCLASS = re.compile(
     r'<rdfs:subClassOf rdf:resource="(http://purl\.obolibrary\.org/obo/(?:CL|PCL)_\d+)"/>'
 )
-_RO_0015003 = re.compile(
-    r'obo:RO_0015003 rdf:resource="(https://purl\.brain-bican\.org/[^"]+)"'
-)
+_RO_0015003 = re.compile(r'obo:RO_0015003 rdf:resource="(https://purl\.brain-bican\.org/[^"]+)"')
 _VERSION = re.compile(r"<owl:versionInfo>([^<]+)</owl:versionInfo>")
 
 
-def _iter_blocks(owl_path: Path) -> tuple[
-    dict[str, str],         # aba_uri -> cl/pcl uri (exact matches)
-    dict[str, str],         # cl/pcl uri -> label
-    dict[str, list[str]],   # cl/pcl uri -> list of superclass uris
-    dict[str, list[str]],   # aba short_id -> list of parent aba short_ids
-    str,                    # ontology version string
+def _iter_blocks(
+    owl_path: Path,
+) -> tuple[
+    dict[str, str],  # aba_uri -> cl/pcl uri (exact matches)
+    dict[str, str],  # cl/pcl uri -> label
+    dict[str, list[str]],  # cl/pcl uri -> list of superclass uris
+    dict[str, list[str]],  # aba short_id -> list of parent aba short_ids
+    str,  # ontology version string
 ]:
     """Stream-parse pcl.owl into the core data structures.
 
@@ -185,6 +186,7 @@ def _iter_blocks(owl_path: Path) -> tuple[
 # Broad-match computation
 # ---------------------------------------------------------------------------
 
+
 def _compute_broad_matches(
     exact_map: dict[str, str],
     labels: dict[str, str],
@@ -272,12 +274,14 @@ def _cl_ancestors_via_subclass(
         visited.add(uri)
         path.append(_short_cl(uri))
         if _is_cl(uri):
-            cl_hits.append({
-                "id": _short_cl(uri),
-                "label": labels.get(uri, ""),
-                "ontology": "CL",
-                "via": list(path[:-1]),
-            })
+            cl_hits.append(
+                {
+                    "id": _short_cl(uri),
+                    "label": labels.get(uri, ""),
+                    "ontology": "CL",
+                    "via": list(path[:-1]),
+                }
+            )
         else:
             for parent in subclass_map.get(uri, []):
                 if parent not in visited:
@@ -320,12 +324,14 @@ def _cl_ancestors_via_individual(
         if node in short_to_uri:
             target = short_to_uri[node]
             if _is_cl(target):
-                results.append({
-                    "id": _short_cl(target),
-                    "label": labels.get(target, ""),
-                    "ontology": "CL",
-                    "via": list(via_path),
-                })
+                results.append(
+                    {
+                        "id": _short_cl(target),
+                        "label": labels.get(target, ""),
+                        "ontology": "CL",
+                        "via": list(via_path),
+                    }
+                )
                 continue
             # PCL — try subClassOf from there
             cl_hits = _cl_ancestors_via_subclass(target, subclass_map, labels)
@@ -343,27 +349,189 @@ def _cl_ancestors_via_individual(
 
 
 # ---------------------------------------------------------------------------
+# IC computation from cl.owl
+# ---------------------------------------------------------------------------
+
+_CL_CLASS_BARE = re.compile(r'<owl:Class rdf:about="(http://purl\.obolibrary\.org/obo/CL_\d+)">')
+_CL_SUBCLASS = re.compile(
+    r'<rdfs:subClassOf rdf:resource="(http://purl\.obolibrary\.org/obo/CL_\d+)"/>'
+)
+
+
+def _parse_cl_hierarchy(cl_owl_path: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """Stream-parse cl.owl to extract subClassOf edges and labels.
+
+    Only CL_ classes and CL_ -> CL_ edges are retained; imported ontology
+    terms (UBERON, GO, etc.) are ignored so that IC reflects the CL graph alone.
+
+    Args:
+        cl_owl_path: Path to base ``cl.owl`` (no imports).
+
+    Returns:
+        Tuple of (child_to_parents, labels) where keys/values are CL URIs.
+    """
+    child_to_parents: dict[str, list[str]] = {}
+    labels: dict[str, str] = {}
+
+    in_class = False
+    depth = 0
+    buf: list[str] = []
+    current: str | None = None
+
+    with open(cl_owl_path, encoding="utf-8") as fh:
+        for line in fh:
+            m = _CL_CLASS_BARE.search(line)
+            if m and not in_class:
+                current = m.group(1)
+                in_class = True
+                depth = 1
+                buf = [line]
+                continue
+
+            if in_class:
+                buf.append(line)
+                if "<owl:Class>" in line or ("<owl:Class " in line and "rdf:about" not in line):
+                    depth += 1
+                if "</owl:Class>" in line:
+                    depth -= 1
+                    if depth == 0:
+                        block = "".join(buf)
+                        lm = _LABEL.search(block)
+                        if lm and current:
+                            labels[current] = lm.group(1).strip()
+                        if current is not None:
+                            child_to_parents[current] = _CL_SUBCLASS.findall(block)
+                        in_class = False
+                        buf = []
+
+    return child_to_parents, labels
+
+
+def _compute_ic(child_to_parents: dict[str, list[str]]) -> dict[str, float]:
+    """Compute structure-based IC for every CL term.
+
+    Uses upward BFS from each leaf so that each leaf is counted exactly once
+    per ancestor, correctly handling polyhierarchy (shared leaves via multiple
+    inheritance paths are not double-counted).
+
+    ``IC(c) = -log2( |distinct_leaf_descendants(c)| / |total_leaves| )``
+
+    Args:
+        child_to_parents: CL URI -> list of direct CL parent URIs.
+
+    Returns:
+        Dict mapping CL URI to IC score (float ≥ 0).
+    """
+    all_uris = set(child_to_parents.keys())
+
+    parent_to_children: dict[str, set[str]] = defaultdict(set)
+    for child, parents in child_to_parents.items():
+        for p in parents:
+            if p in all_uris:
+                parent_to_children[p].add(child)
+
+    leaves: set[str] = {u for u in all_uris if not parent_to_children.get(u)}
+    total = len(leaves)
+
+    # Propagate each leaf upward; set membership prevents double-counting
+    leaf_sets: dict[str, set[str]] = {u: set() for u in all_uris}
+    for leaf in leaves:
+        visited: set[str] = set()
+        queue = [leaf]
+        while queue:
+            node = queue.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            leaf_sets[node].add(leaf)
+            for parent in child_to_parents.get(node, []):
+                if parent in all_uris and parent not in visited:
+                    queue.append(parent)
+
+    return {uri: -math.log2(len(s) / total) if s else 0.0 for uri, s in leaf_sets.items()}
+
+
+def _select_best_cl(
+    exact_map: dict[str, str],
+    broad_out: dict[str, list[dict[str, Any]]],
+    ic: dict[str, float],
+    cl_labels: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    """Choose the highest-IC CL term for every ABA ID.
+
+    For CL exact matches the exact term is the best.
+    For PCL exact matches the highest-IC CL broad match wins.
+
+    Args:
+        exact_map: ABA URI -> CL/PCL URI.
+        broad_out: ABA short ID -> list of broad-match dicts.
+        ic: CL URI -> IC score.
+        cl_labels: CL URI -> label (from cl.owl; may supplement pcl.owl labels).
+
+    Returns:
+        Dict mapping ABA short ID -> ``{id, label, ic}`` for the best CL term.
+    """
+
+    def uri(curie: str) -> str:
+        return "http://purl.obolibrary.org/obo/" + curie.replace(":", "_")
+
+    best: dict[str, dict[str, Any]] = {}
+
+    for aba_uri, target_uri in exact_map.items():
+        aba_short = _aba_short(aba_uri)
+
+        if _is_cl(target_uri):
+            curie = _short_cl(target_uri)
+            score = ic.get(target_uri, 0.0)
+            label = cl_labels.get(target_uri, "")
+            best[aba_short] = {"id": curie, "label": label, "ic": round(score, 4)}
+            continue
+
+        # PCL — pick highest-IC CL broad match
+        candidates = broad_out.get(aba_short, [])
+        scored = [
+            (ic.get(uri(b["id"]), 0.0), b["id"], cl_labels.get(uri(b["id"]), b.get("label", "")))
+            for b in candidates
+            if b.get("id", "").startswith("CL:")
+        ]
+        if scored:
+            scored.sort(key=lambda x: -x[0])
+            score, curie, label = scored[0]
+            best[aba_short] = {"id": curie, "label": label, "ic": round(score, 4)}
+
+    return best
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def build_mapping(owl_path: Path) -> dict[str, Any]:
+
+def build_mapping(owl_path: Path, cl_owl_path: Path | None = None) -> dict[str, Any]:
     """Parse *owl_path* and return the full versioned mapping dict.
 
     Args:
         owl_path: Path to pcl.owl (RDF/XML).
+        cl_owl_path: Path to base cl.owl (no imports) for IC computation.
+            When provided, a ``best_cl`` section is added to the output mapping
+            and each entry in ``exact`` gains a ``best_cl_id`` convenience key.
+            When omitted the mapping is generated without IC data and
+            ``best_cl`` will be absent.
 
     Returns:
-        Dict with keys: version, source, generated, exact, broad.
+        Dict with keys: version, source, generated, exact, broad, and
+        optionally best_cl.
 
     Example:
         .. code-block:: python
 
-            mapping = build_mapping(Path("pcl.owl"))
+            mapping = build_mapping(Path("pcl.owl"), Path("cl.owl"))
             print(mapping["version"])
+            print(mapping["best_cl"]["CS20230722_SUBC_313"])
     """
     exact_map, labels, subclass_map, ind_hierarchy, version = _iter_blocks(owl_path)
 
-    exact_out: dict[str, dict[str, str]] = {}
+    exact_out: dict[str, dict[str, Any]] = {}
     for aba_uri, target_uri in exact_map.items():
         aba_short = _aba_short(aba_uri)
         ontology = "CL" if _is_cl(target_uri) else "PCL"
@@ -375,7 +543,7 @@ def build_mapping(owl_path: Path) -> dict[str, Any]:
 
     broad_out = _compute_broad_matches(exact_map, labels, subclass_map, ind_hierarchy)
 
-    return {
+    result: dict[str, Any] = {
         "version": version,
         "source": str(owl_path),
         "generated": datetime.now(UTC).isoformat(),
@@ -383,13 +551,26 @@ def build_mapping(owl_path: Path) -> dict[str, Any]:
         "broad": broad_out,
     }
 
+    if cl_owl_path is not None:
+        cl_child_to_parents, cl_labels = _parse_cl_hierarchy(cl_owl_path)
+        ic = _compute_ic(cl_child_to_parents)
+        best_cl = _select_best_cl(exact_map, broad_out, ic, cl_labels)
+        result["best_cl"] = best_cl
 
-def build_mapping_from_string(owl_xml: str, source: str = "<string>") -> dict[str, Any]:
+    return result
+
+
+def build_mapping_from_string(
+    owl_xml: str,
+    source: str = "<string>",
+    cl_owl_xml: str | None = None,
+) -> dict[str, Any]:
     """Parse OWL XML from a string (mainly for testing).
 
     Args:
-        owl_xml: Full RDF/XML content of an OWL file.
+        owl_xml: Full RDF/XML content of a PCL OWL file.
         source: Label to use in the ``source`` field of the output.
+        cl_owl_xml: Optional base CL OWL XML for IC computation.
 
     Returns:
         Same structure as :func:`build_mapping`.
@@ -400,12 +581,22 @@ def build_mapping_from_string(owl_xml: str, source: str = "<string>") -> dict[st
         tf.write(owl_xml)
         tmp_path = Path(tf.name)
 
+    cl_tmp: Path | None = None
+    if cl_owl_xml is not None:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".owl", delete=False, encoding="utf-8"
+        ) as cf:
+            cf.write(cl_owl_xml)
+            cl_tmp = Path(cf.name)
+
     try:
-        result = build_mapping(tmp_path)
+        result = build_mapping(tmp_path, cl_owl_path=cl_tmp)
         result["source"] = source
         return result
     finally:
         tmp_path.unlink(missing_ok=True)
+        if cl_tmp:
+            cl_tmp.unlink(missing_ok=True)
 
 
 def save_mapping(mapping: dict[str, Any], output_path: Path) -> None:
