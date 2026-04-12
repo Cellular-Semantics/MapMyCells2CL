@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 mapmycells2cl = "mapmycells2cl.cli:cli"
+mmc2cl = "mapmycells2cl.cli:cli"
 
 [dependency-groups]
 dev = [

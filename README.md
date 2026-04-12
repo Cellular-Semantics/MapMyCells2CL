@@ -9,23 +9,28 @@ MapMyCells assigns cells to Allen Brain Atlas (ABA) taxonomy nodes (e.g. `CS2023
 ## Quick start
 
 ```bash
-# 1. Clone and set up
-git clone https://github.com/Cellular-Semantics/MapMyCells2CL.git
-cd MapMyCells2CL
-uv sync
+pip install mapmycells2cl
 
-# 2. Annotate a MapMyCells CSV
-./mmc2cl annotate results.csv
+# Annotate a MapMyCells CSV
+mmc2cl annotate results.csv
 # → results_annotated.csv
 
-# 3. Annotate an h5ad file (CxG-compliant obs columns)
-./mmc2cl annotate-h5ad results.csv cells.h5ad
+# Annotate an h5ad file (CxG-compliant obs columns)
+mmc2cl annotate-h5ad results.csv cells.h5ad
 # → cells_annotated.h5ad
 ```
 
 ---
 
 ## Installation
+
+```bash
+pip install mapmycells2cl
+# or
+uv add mapmycells2cl
+```
+
+Installing the package places two equivalent commands in your PATH: `mmc2cl` (short form) and `mapmycells2cl`.
 
 ### From source (development)
 
@@ -37,27 +42,7 @@ cd MapMyCells2CL
 uv sync
 ```
 
-This creates a `.venv` and installs the package with all dependencies. The `./mmc2cl` runner script uses this venv directly.
-
-### As a Python package
-
-```bash
-pip install mapmycells2cl
-# or
-uv add mapmycells2cl
-```
-
----
-
-## The `./mmc2cl` runner
-
-`mmc2cl` is a standalone shell script at the repo root. After `uv sync` it requires no `python` or `uv` prefix:
-
-```bash
-./mmc2cl <command> [options]
-```
-
-It looks for the installed venv binary first (fast path), then falls back to `uv run` if needed.
+`uv sync` installs the package into a local `.venv`, making `mmc2cl` and `mapmycells2cl` available via `uv run` or directly after activating the venv.
 
 ---
 
@@ -68,7 +53,7 @@ It looks for the installed venv binary first (fast path), then falls back to `uv
 Annotate a MapMyCells CSV or JSON output file with CL terms.
 
 ```bash
-./mmc2cl annotate INPUT_FILE [OPTIONS]
+mmc2cl annotate INPUT_FILE [OPTIONS]
 ```
 
 | Option | Description |
@@ -80,13 +65,13 @@ Annotate a MapMyCells CSV or JSON output file with CL terms.
 
 ```bash
 # Annotate CSV
-./mmc2cl annotate results.csv
+mmc2cl annotate results.csv
 
 # Annotate JSON
-./mmc2cl annotate results.json
+mmc2cl annotate results.json
 
 # Specify output path
-./mmc2cl annotate results.csv -o /data/annotated.csv
+mmc2cl annotate results.csv -o /data/annotated.csv
 ```
 
 **CSV output columns** — added after each `{level}_label` column using the CAP/HCA double-dash convention:
@@ -119,7 +104,7 @@ subclass--cell_type_cl_broad_ontology_term_ids → CL:4023017|CL:4023069
 Annotate an AnnData h5ad file with CL terms from a MapMyCells CSV. Adds CL columns directly to `adata.obs`, including the unprefixed `cell_type_ontology_term_id` / `cell_type` pair required by the [CELLxGENE schema](https://github.com/chanzuckerberg/single-cell-curation/blob/main/schema/5.3.0/schema.md).
 
 ```bash
-./mmc2cl annotate-h5ad MMC_CSV H5AD_IN [OPTIONS]
+mmc2cl annotate-h5ad MMC_CSV H5AD_IN [OPTIONS]
 ```
 
 | Option | Description |
@@ -132,10 +117,10 @@ Annotate an AnnData h5ad file with CL terms from a MapMyCells CSV. Adds CL colum
 
 ```bash
 # Annotate h5ad — output written to cells_annotated.h5ad
-./mmc2cl annotate-h5ad results.csv cells.h5ad
+mmc2cl annotate-h5ad results.csv cells.h5ad
 
 # Use supertype level for the CxG cell_type columns
-./mmc2cl annotate-h5ad results.csv cells.h5ad --cxg-level supertype
+mmc2cl annotate-h5ad results.csv cells.h5ad --cxg-level supertype
 ```
 
 **obs columns added:**
@@ -159,7 +144,7 @@ Cells present in the h5ad but absent from the mmc CSV get empty strings.
 Download the latest `pcl.owl` and regenerate the bundled `mapping.json`. Pass `--cl-owl` to include IC-ranked best-CL data (strongly recommended).
 
 ```bash
-./mmc2cl update-mappings [OPTIONS]
+mmc2cl update-mappings [OPTIONS]
 ```
 
 | Option | Description |
@@ -172,13 +157,13 @@ Download the latest `pcl.owl` and regenerate the bundled `mapping.json`. Pass `-
 
 ```bash
 # Download latest pcl.owl and regenerate (no IC)
-./mmc2cl update-mappings
+mmc2cl update-mappings
 
 # With IC ranking (recommended) — requires cl.owl (~63 MB)
-./mmc2cl update-mappings --cl-owl cl.owl
+mmc2cl update-mappings --cl-owl cl.owl
 
 # Use locally cached files
-./mmc2cl update-mappings --owl pcl.owl --cl-owl cl.owl
+mmc2cl update-mappings --owl pcl.owl --cl-owl cl.owl
 ```
 
 > **Note:** `cl.owl` is large (~63 MB). The PURL `http://purl.obolibrary.org/obo/cl.owl` redirects to GitHub; download it manually if needed and pass the path with `--cl-owl`.
