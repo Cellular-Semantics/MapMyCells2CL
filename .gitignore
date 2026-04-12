@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Coverage
+.coverage
+htmlcov/
+
+# Large OWL/ontology source files (use update-mappings to regenerate)
+cl-full.owl
+cl-full.json
+pcl.owl
+
+# MapMyCells annotated output files
+*_annotated.csv
+*_annotated.json
+
+# Pytest cache
+.pytest_cache/
+
