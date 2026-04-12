@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# mmc2cl — standalone runner for mapmycells2cl
+#
+# Usage:  ./mmc2cl <command> [options]
+# Setup:  uv sync   (once, to create the virtualenv)
+#
+# Examples:
+#   ./mmc2cl annotate results.csv
+#   ./mmc2cl annotate results.json -o annotated.json
+#   ./mmc2cl update-mappings
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Prefer the venv binary directly (fast, no uv overhead)
+VENV_BIN="$SCRIPT_DIR/.venv/bin/mapmycells2cl"
+
+if [[ -x "$VENV_BIN" ]]; then
+    exec "$VENV_BIN" "$@"
+fi
+
+# Fallback: uv run (will create/update venv automatically if needed)
+if command -v uv &>/dev/null; then
+    exec uv run --project "$SCRIPT_DIR" mapmycells2cl "$@"
+fi
+
+echo "error: virtualenv not found and 'uv' is not on PATH." >&2
+echo "  Run 'uv sync' from $SCRIPT_DIR to set up the environment." >&2
+exit 1
