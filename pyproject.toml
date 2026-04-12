@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 license = { text = "MIT" }
 keywords = ["cell-ontology", "mapmycells", "allen-brain-atlas", "single-cell"]
 dependencies = [
+    "anndata>=0.12.10",
     "click>=8.1",
 ]
 
@@ -20,6 +21,7 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.5",
     "pre-commit>=3.7",
+    "pandas-stubs>=3.0.0.260204",
 ]
 
 [build-system]
@@ -40,6 +42,10 @@ markers = [
 python_version = "3.13"
 strict = true
 files = ["src/mapmycells2cl"]
+
+[[tool.mypy.overrides]]
+module = ["anndata", "anndata.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
