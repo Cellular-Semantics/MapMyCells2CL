@@ -40,9 +40,14 @@ Requires [uv](https://docs.astral.sh/uv/).
 git clone https://github.com/Cellular-Semantics/MapMyCells2CL.git
 cd MapMyCells2CL
 uv sync
-```
 
-`uv sync` installs the package into a local `.venv`, making `mmc2cl` and `mapmycells2cl` available via `uv run` or directly after activating the venv.
+# Run via uv (no venv activation needed)
+uv run mmc2cl annotate results.csv
+
+# Or activate the venv once and use the command directly
+source .venv/bin/activate
+mmc2cl annotate results.csv
+```
 
 ---
 
