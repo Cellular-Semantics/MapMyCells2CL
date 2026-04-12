@@ -72,31 +72,25 @@ def _is_aba(uri: str) -> bool:
 _CLASS_START = re.compile(
     r'<owl:Class rdf:about="(http://purl\.obolibrary\.org/obo/(?:CL|PCL)_\d+)">'
 )
-_IND_START = re.compile(
-    r'<owl:NamedIndividual rdf:about="(https://purl\.brain-bican\.org/[^"]+)">'
-)
-_EQUIV_RO = re.compile(
-    r'<owl:onProperty rdf:resource="[^"]*RO_0015001"/>'
-)
-_HAS_VALUE = re.compile(
-    r'<owl:hasValue rdf:resource="(https://purl\.brain-bican\.org/[^"]+)"/>'
-)
+_IND_START = re.compile(r'<owl:NamedIndividual rdf:about="(https://purl\.brain-bican\.org/[^"]+)">')
+_EQUIV_RO = re.compile(r'<owl:onProperty rdf:resource="[^"]*RO_0015001"/>')
+_HAS_VALUE = re.compile(r'<owl:hasValue rdf:resource="(https://purl\.brain-bican\.org/[^"]+)"/>')
 _LABEL = re.compile(r"<rdfs:label[^>]*>([^<]+)</rdfs:label>")
 _SUBCLASS = re.compile(
     r'<rdfs:subClassOf rdf:resource="(http://purl\.obolibrary\.org/obo/(?:CL|PCL)_\d+)"/>'
 )
-_RO_0015003 = re.compile(
-    r'obo:RO_0015003 rdf:resource="(https://purl\.brain-bican\.org/[^"]+)"'
-)
+_RO_0015003 = re.compile(r'obo:RO_0015003 rdf:resource="(https://purl\.brain-bican\.org/[^"]+)"')
 _VERSION = re.compile(r"<owl:versionInfo>([^<]+)</owl:versionInfo>")
 
 
-def _iter_blocks(owl_path: Path) -> tuple[
-    dict[str, str],         # aba_uri -> cl/pcl uri (exact matches)
-    dict[str, str],         # cl/pcl uri -> label
-    dict[str, list[str]],   # cl/pcl uri -> list of superclass uris
-    dict[str, list[str]],   # aba short_id -> list of parent aba short_ids
-    str,                    # ontology version string
+def _iter_blocks(
+    owl_path: Path,
+) -> tuple[
+    dict[str, str],  # aba_uri -> cl/pcl uri (exact matches)
+    dict[str, str],  # cl/pcl uri -> label
+    dict[str, list[str]],  # cl/pcl uri -> list of superclass uris
+    dict[str, list[str]],  # aba short_id -> list of parent aba short_ids
+    str,  # ontology version string
 ]:
     """Stream-parse pcl.owl into the core data structures.
 
@@ -192,6 +186,7 @@ def _iter_blocks(owl_path: Path) -> tuple[
 # Broad-match computation
 # ---------------------------------------------------------------------------
 
+
 def _compute_broad_matches(
     exact_map: dict[str, str],
     labels: dict[str, str],
@@ -279,12 +274,14 @@ def _cl_ancestors_via_subclass(
         visited.add(uri)
         path.append(_short_cl(uri))
         if _is_cl(uri):
-            cl_hits.append({
-                "id": _short_cl(uri),
-                "label": labels.get(uri, ""),
-                "ontology": "CL",
-                "via": list(path[:-1]),
-            })
+            cl_hits.append(
+                {
+                    "id": _short_cl(uri),
+                    "label": labels.get(uri, ""),
+                    "ontology": "CL",
+                    "via": list(path[:-1]),
+                }
+            )
         else:
             for parent in subclass_map.get(uri, []):
                 if parent not in visited:
@@ -327,12 +324,14 @@ def _cl_ancestors_via_individual(
         if node in short_to_uri:
             target = short_to_uri[node]
             if _is_cl(target):
-                results.append({
-                    "id": _short_cl(target),
-                    "label": labels.get(target, ""),
-                    "ontology": "CL",
-                    "via": list(via_path),
-                })
+                results.append(
+                    {
+                        "id": _short_cl(target),
+                        "label": labels.get(target, ""),
+                        "ontology": "CL",
+                        "via": list(via_path),
+                    }
+                )
                 continue
             # PCL — try subClassOf from there
             cl_hits = _cl_ancestors_via_subclass(target, subclass_map, labels)
@@ -353,9 +352,7 @@ def _cl_ancestors_via_individual(
 # IC computation from cl.owl
 # ---------------------------------------------------------------------------
 
-_CL_CLASS_BARE = re.compile(
-    r'<owl:Class rdf:about="(http://purl\.obolibrary\.org/obo/CL_\d+)">'
-)
+_CL_CLASS_BARE = re.compile(r'<owl:Class rdf:about="(http://purl\.obolibrary\.org/obo/CL_\d+)">')
 _CL_SUBCLASS = re.compile(
     r'<rdfs:subClassOf rdf:resource="(http://purl\.obolibrary\.org/obo/CL_\d+)"/>'
 )
@@ -451,10 +448,7 @@ def _compute_ic(child_to_parents: dict[str, list[str]]) -> dict[str, float]:
                 if parent in all_uris and parent not in visited:
                     queue.append(parent)
 
-    return {
-        uri: -math.log2(len(s) / total) if s else 0.0
-        for uri, s in leaf_sets.items()
-    }
+    return {uri: -math.log2(len(s) / total) if s else 0.0 for uri, s in leaf_sets.items()}
 
 
 def _select_best_cl(
@@ -477,6 +471,7 @@ def _select_best_cl(
     Returns:
         Dict mapping ABA short ID -> ``{id, label, ic}`` for the best CL term.
     """
+
     def uri(curie: str) -> str:
         return "http://purl.obolibrary.org/obo/" + curie.replace(":", "_")
 
@@ -510,6 +505,7 @@ def _select_best_cl(
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def build_mapping(owl_path: Path, cl_owl_path: Path | None = None) -> dict[str, Any]:
     """Parse *owl_path* and return the full versioned mapping dict.

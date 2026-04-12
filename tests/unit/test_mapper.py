@@ -23,6 +23,7 @@ def mapper(minimal_owl_xml: str, minimal_cl_owl_xml: str) -> CellTypeMapper:
 # Basic lookup
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 def test_lookup_cl_exact(mapper: CellTypeMapper) -> None:
     result = mapper.lookup("CS20230722_SUBC_313")
@@ -74,6 +75,7 @@ def test_result_carries_version(mapper: CellTypeMapper) -> None:
 # ---------------------------------------------------------------------------
 # best_cl / IC fields
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 def test_has_ic_true(mapper: CellTypeMapper) -> None:

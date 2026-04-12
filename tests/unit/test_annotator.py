@@ -22,6 +22,7 @@ def mapper(minimal_owl_xml: str, minimal_cl_owl_xml: str) -> CellTypeMapper:
 # CSV — column naming (CAP/HCA double-dash convention)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 def test_csv_cl_exact_columns(mapper: CellTypeMapper) -> None:
     """CL exact match: only cell_type pair written, no PCL columns."""
@@ -31,6 +32,7 @@ def test_csv_cl_exact_columns(mapper: CellTypeMapper) -> None:
     """)
     out = annotate_csv_string(csv_text, mapper)
     import csv as _csv
+
     row = next(_csv.DictReader(out.splitlines()))
 
     assert row["cluster--cell_type_ontology_term_id"] == "CL:4300353"
@@ -50,6 +52,7 @@ def test_csv_pcl_exact_has_all_columns(mapper: CellTypeMapper) -> None:
     """)
     out = annotate_csv_string(csv_text, mapper)
     import csv as _csv
+
     row = next(_csv.DictReader(out.splitlines()))
 
     assert row["cluster--cell_type_ontology_term_id"] == "CL:4300353"
@@ -65,6 +68,7 @@ def test_csv_unknown_id_empty(mapper: CellTypeMapper) -> None:
     """)
     out = annotate_csv_string(csv_text, mapper)
     import csv as _csv
+
     row = next(_csv.DictReader(out.splitlines()))
     assert row["cluster--cell_type_ontology_term_id"] == ""
     assert row["cluster--cell_type"] == ""
@@ -79,6 +83,7 @@ def test_csv_multiple_levels(mapper: CellTypeMapper) -> None:
     """)
     out = annotate_csv_string(csv_text, mapper)
     import csv as _csv
+
     row = next(_csv.DictReader(out.splitlines()))
     assert row["subclass--cell_type_ontology_term_id"] == "CL:4300353"
     assert row["cluster--cell_type_ontology_term_id"] == "CL:4300353"
@@ -97,6 +102,7 @@ def test_csv_mixed_cl_and_pcl_levels(mapper: CellTypeMapper) -> None:
     """)
     out = annotate_csv_string(csv_text, mapper)
     import csv as _csv
+
     rows = list(_csv.DictReader(out.splitlines()))
     # CLUS_0002 is PCL so PCL columns are present for the level
     assert "subclass--cell_type_pcl_ontology_term_id" in rows[1]
@@ -108,11 +114,12 @@ def test_csv_mixed_cl_and_pcl_levels(mapper: CellTypeMapper) -> None:
 # JSON
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 def test_json_cl_exact(tmp_path: Path, mapper: CellTypeMapper) -> None:
-    data = {"results": [{"cell_id": "c1", "assignment": {
-        "cluster": {"label": "CS20230722_SUBC_313"}
-    }}]}
+    data = {
+        "results": [{"cell_id": "c1", "assignment": {"cluster": {"label": "CS20230722_SUBC_313"}}}]
+    }
     in_p, out_p = tmp_path / "i.json", tmp_path / "o.json"
     in_p.write_text(json.dumps(data))
     annotate_json(in_p, out_p, mapper)
@@ -125,9 +132,9 @@ def test_json_cl_exact(tmp_path: Path, mapper: CellTypeMapper) -> None:
 
 @pytest.mark.unit
 def test_json_pcl_exact(tmp_path: Path, mapper: CellTypeMapper) -> None:
-    data = {"results": [{"cell_id": "c1", "assignment": {
-        "cluster": {"label": "CS20230722_CLUS_0002"}
-    }}]}
+    data = {
+        "results": [{"cell_id": "c1", "assignment": {"cluster": {"label": "CS20230722_CLUS_0002"}}}]
+    }
     in_p, out_p = tmp_path / "i.json", tmp_path / "o.json"
     in_p.write_text(json.dumps(data))
     annotate_json(in_p, out_p, mapper)
@@ -140,9 +147,9 @@ def test_json_pcl_exact(tmp_path: Path, mapper: CellTypeMapper) -> None:
 
 @pytest.mark.unit
 def test_json_unknown_id(tmp_path: Path, mapper: CellTypeMapper) -> None:
-    data = {"results": [{"cell_id": "c1", "assignment": {
-        "cluster": {"label": "CS20230722_NOPE_999"}
-    }}]}
+    data = {
+        "results": [{"cell_id": "c1", "assignment": {"cluster": {"label": "CS20230722_NOPE_999"}}}]
+    }
     in_p, out_p = tmp_path / "i.json", tmp_path / "o.json"
     in_p.write_text(json.dumps(data))
     annotate_json(in_p, out_p, mapper)

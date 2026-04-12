@@ -76,9 +76,7 @@ def _cl_columns_for_level(level: str, result: MatchResult) -> dict[str, str]:
     if result.found and result.ontology == "PCL":
         cols[f"{prefix}cell_type_pcl_ontology_term_id"] = result.exact_id
         cols[f"{prefix}cell_type_pcl"] = result.exact_label
-        cols[f"{prefix}cell_type_cl_broad_ontology_term_ids"] = "|".join(
-            b.id for b in result.broad
-        )
+        cols[f"{prefix}cell_type_cl_broad_ontology_term_ids"] = "|".join(b.id for b in result.broad)
     return cols
 
 
@@ -133,10 +131,21 @@ def annotate_csv(
         extra: dict[str, str] = {}
         for level in levels:
             aba_id = row.get(f"{level}_label", "").strip()
-            result = mapper.lookup(aba_id) if aba_id else MatchResult(
-                aba_id="", exact_id="", exact_label="", ontology="",
-                broad=[], best_cl_id="", best_cl_label="", best_cl_ic=0.0,
-                mapping_version=mapper.mapping_version, found=False,
+            result = (
+                mapper.lookup(aba_id)
+                if aba_id
+                else MatchResult(
+                    aba_id="",
+                    exact_id="",
+                    exact_label="",
+                    ontology="",
+                    broad=[],
+                    best_cl_id="",
+                    best_cl_label="",
+                    best_cl_ic=0.0,
+                    mapping_version=mapper.mapping_version,
+                    found=False,
+                )
             )
             extra.update(_cl_columns_for_level(level, result))
             if result.found and result.ontology == "PCL":

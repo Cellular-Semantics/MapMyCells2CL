@@ -94,6 +94,7 @@ class CellTypeMapper:
 
         if not self._best_cl:
             import warnings
+
             warnings.warn(
                 "Mapping file has no 'best_cl' data. "
                 "Regenerate with `mapmycells2cl update-mappings --cl-owl cl.owl` "

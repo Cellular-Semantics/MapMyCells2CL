@@ -54,13 +54,15 @@ def test_no_broad_for_cl_exact(minimal_owl_xml: str) -> None:
 
 @pytest.mark.unit
 def test_mapping_has_required_keys(minimal_owl_xml: str) -> None:
-    assert {"version", "source", "generated", "exact", "broad"} <= \
-        build_mapping_from_string(minimal_owl_xml).keys()
+    assert {"version", "source", "generated", "exact", "broad"} <= build_mapping_from_string(
+        minimal_owl_xml
+    ).keys()
 
 
 # ---------------------------------------------------------------------------
 # IC / best_cl tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 def test_best_cl_absent_without_cl_owl(minimal_owl_xml: str) -> None:

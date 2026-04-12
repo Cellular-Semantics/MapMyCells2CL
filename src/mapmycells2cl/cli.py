@@ -26,10 +26,21 @@ def cli() -> None:
 
 @cli.command()
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
-@click.option("-o", "--output", "output_file", type=click.Path(path_type=Path), default=None,
-              help="Output file path. Defaults to <input>_annotated.<ext>.")
-@click.option("--mapping", "mapping_path", type=click.Path(exists=True, path_type=Path),
-              default=None, help="Path to a custom mapping JSON file.")
+@click.option(
+    "-o",
+    "--output",
+    "output_file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output file path. Defaults to <input>_annotated.<ext>.",
+)
+@click.option(
+    "--mapping",
+    "mapping_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to a custom mapping JSON file.",
+)
 def annotate(input_file: Path, output_file: Path | None, mapping_path: Path | None) -> None:
     """Annotate a MapMyCells CSV or JSON file with CL terms.
 
@@ -64,12 +75,27 @@ def annotate(input_file: Path, output_file: Path | None, mapping_path: Path | No
 
 
 @cli.command("update-mappings")
-@click.option("--owl", "owl_path", type=click.Path(path_type=Path), default=None,
-              help="Path to a local pcl.owl. Downloads from PURL if omitted.")
-@click.option("--cl-owl", "cl_owl_path", type=click.Path(path_type=Path), default=None,
-              help="Path to base cl.owl for IC computation. Downloads if omitted.")
-@click.option("--output", "output_path", type=click.Path(path_type=Path), default=None,
-              help="Output path for mapping JSON. Defaults to bundled data/mapping.json.")
+@click.option(
+    "--owl",
+    "owl_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to a local pcl.owl. Downloads from PURL if omitted.",
+)
+@click.option(
+    "--cl-owl",
+    "cl_owl_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to base cl.owl for IC computation. Downloads if omitted.",
+)
+@click.option(
+    "--output",
+    "output_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output path for mapping JSON. Defaults to bundled data/mapping.json.",
+)
 def update_mappings(
     owl_path: Path | None,
     cl_owl_path: Path | None,
