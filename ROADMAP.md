@@ -165,11 +165,98 @@ mapmycells2cl annotate input.csv -o output.csv
 mapmycells2cl annotate input.json -o output.json
 ```
 
-### Phase 4: Post-MVP — h5ad support
+### Phase 4: Post-MVP — most-specific CL term via Information Content
 
-Add support for annotating h5ad files following CELLxGENE schema conventions.
+When a PCL exact match has multiple CL broad matches (polyhierarchy), there is currently no principled way to select the single "best" CL term. The output exposes all of them, leaving the choice to the user. This phase adds IC-based ranking to identify the most specific informative CL term.
 
-### Phase 5: Post-MVP — mapping regeneration CLI
+**Problem:** Given a PCL cluster with broad matches `[CL:4023017, CL:4023069]`, one term may be a highly specific interneuron type while the other is a broad regional classification. A user wanting a single annotation needs a way to pick the more informative one.
+
+**Proposed approach — Information Content (IC):**
+
+IC quantifies specificity from the ontology graph structure. More specific (lower in the hierarchy, fewer descendants) terms have higher IC.
+
+Two IC formulations to explore:
+
+- **Structure-based IC** (no corpus needed): `IC(c) = -log( desc(c) / |leaves| )` where `desc(c)` is the number of leaf descendants of `c`. Computable directly from CL without external data.
+- **Annotation-based IC**: weighted by how many annotated cells use the term in a reference corpus. More biologically grounded but requires a reference dataset.
+
+For an initial implementation, structure-based IC over **CL alone** is the right starting point.
+
+**Why CL alone, not PCL:**
+
+PCL has two properties that distort IC calculations:
+
+1. **Uneven coverage** — ABA taxonomy coverage in PCL is dense in some brain regions and sparse in others. IC computed over a graph with thousands of nodes in one subtree and few in another will artificially inflate specificity scores for the well-covered areas.
+2. **Potential redundancy** — PCL contains provisional terms that may partially overlap in meaning before formal CL curation. This could make some subtrees artificially deep.
+
+CL alone gives a cleaner, more stable base for IC. PCL terms are then mapped to their CL ancestors for scoring.
+
+**Output additions:**
+
+- `{level}_cl_best` — single most-specific CL CURIE by IC among the broad matches (or the exact match if already CL)
+- `{level}_cl_best_label` — label for the best term
+- `{level}_cl_best_ic` — IC score (optional, for transparency)
+
+**Experiments to run (`experiments/`) before implementing:**
+
+1. Compute structure-based IC over CL alone; inspect distribution across cell type subtrees.
+2. For a sample of PCL clusters with multiple CL broad matches, compare the IC-ranked "best" term against biological intuition (e.g. for Sst interneuron clusters, does IC select the interneuron-type term over the broader regional term?).
+3. Evaluate whether IC differs meaningfully between the two available CL graphs (full CL vs CL without PCL imports).
+4. Consider whether IC should be pre-computed and stored in `mapping.json` (fast lookup, version-locked) or computed on the fly from CL at runtime (always current, adds CL as a dependency).
+
+**Critique / risks:**
+
+- Structure-based IC is sensitive to ontology size and how "complete" a subtree is — CL cell type coverage is itself uneven in some areas.
+- Annotation-based IC would be more robust but requires agreeing on a reference corpus; this is worth revisiting post-MVP once the tool is in use.
+- "Most specific" is not always "most useful" — a highly specific term in a poorly curated subtree may be less informative than a slightly less specific but well-established term. May need a confidence threshold.
+
+### Phase 5: Post-MVP — h5ad support (CELLxGENE schema compliant)
+
+Add support for annotating h5ad files, with output that conforms to the [CELLxGENE schema](https://github.com/chanzuckerberg/single-cell-curation/blob/main/schema/5.2.0/schema.md) for cell type annotation so that annotated datasets can be submitted directly to CZ CELLxGENE Discover.
+
+**CELLxGENE schema requirements for cell type annotation (`obs` columns):**
+
+- `cell_type_ontology_term_id` — a valid CL term CURIE (must be CL, not PCL). Required field. Must be the most specific *CL* term applicable.
+- `cell_type` — human-readable label corresponding to the CURIE. Populated automatically from the ontology.
+- The schema forbids PCL CURIEs in `cell_type_ontology_term_id` — this is why IC-based selection of the best CL broad match (Phase 4) is a prerequisite: for cells whose exact match is PCL, we must select a CL term to write here.
+
+**Mapping strategy for CxG compliance:**
+
+| Exact match type | `cell_type_ontology_term_id` | Source |
+|------------------|------------------------------|--------|
+| CL exact match | exact match CURIE | Phase 1 |
+| PCL exact match with CL broad matches | highest-IC CL broad match | Phase 4 |
+| PCL exact match, no CL broad match | `CL:0000000` (cell) + warning | fallback |
+
+**Implementation:**
+
+1. Read h5ad with `anndata`.
+2. For each cell, look up the `{level}_label` value from an existing MapMyCells obs column (or run annotation inline).
+3. Write `cell_type_ontology_term_id` and `cell_type` to `obs`, selecting the best CL term per the table above.
+4. Validate the output against the CxG schema using the `cellxgene-schema` validator if available.
+5. Write annotated h5ad.
+
+**Dependency note:** Requires `anndata` (runtime) and optionally `cellxgene-schema` (validation). Both are optional extras to keep the base install light:
+
+```bash
+pip install mapmycells2cl[h5ad]          # adds anndata
+pip install mapmycells2cl[h5ad,validate] # adds anndata + cellxgene-schema
+```
+
+**CLI:**
+
+```bash
+mapmycells2cl annotate input.h5ad -o output.h5ad
+mapmycells2cl annotate input.h5ad --validate   # run CxG schema validator after writing
+```
+
+**Critique / risks:**
+
+- CxG schema evolves — pin the target schema version and document it.
+- Phase 4 (IC selection) is a hard prerequisite: without a principled "best CL" selection, PCL-only exact matches cannot be validly written to `cell_type_ontology_term_id`.
+- `CL:0000000` fallback is schema-valid but semantically uninformative; warn loudly and report which ABA IDs triggered it.
+
+### Phase 6: Post-MVP — mapping regeneration CLI
 
 ```bash
 # Download latest pcl.owl and regenerate mapping
