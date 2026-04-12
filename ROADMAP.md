@@ -249,29 +249,56 @@ Add support for annotating h5ad files, with output that conforms to the [CELLxGE
 
 **CELLxGENE schema requirements for cell type annotation (`obs` columns):**
 
-- `cell_type_ontology_term_id` — a valid CL term CURIE (must be CL, not PCL). Required field. Must be the most specific *CL* term applicable.
-- `cell_type` — human-readable label corresponding to the CURIE. Populated automatically from the ontology.
-- The schema forbids PCL CURIEs in `cell_type_ontology_term_id` — this is why IC-based selection of the best CL broad match (Phase 4) is a prerequisite: for cells whose exact match is PCL, we must select a CL term to write here.
+- `cell_type_ontology_term_id` — a valid CL CURIE (must be CL, not PCL). Required. Unprefixed.
+- `cell_type` — human-readable label for the above. Required. Unprefixed.
+- PCL CURIEs are forbidden in `cell_type_ontology_term_id` — IC-based best-CL selection (Phase 4) is therefore a hard prerequisite.
 
-**Mapping strategy for CxG compliance:**
+**obs column layout for h5ad output:**
 
-| Exact match type | `cell_type_ontology_term_id` | Source |
-|------------------|------------------------------|--------|
-| CL exact match | exact match CURIE | Phase 1 |
+The CxG-required unprefixed pair is always written and always carries the
+single winning CL term. This is the cluster-level best CL (finest ABA
+taxonomy level), which is also the most specific CL across all levels.
+All other levels and provenance fields sit alongside it in prefixed columns.
+
+```
+# CxG required — unprefixed, single winning CL term (cluster level)
+cell_type_ontology_term_id    CL:4023017
+cell_type                     sst GABAergic interneuron
+
+# Per-level annotations — CAP/HCA double-dash prefix
+cluster--cell_type_ontology_term_id        CL:4023017
+cluster--cell_type                         sst GABAergic interneuron
+cluster--cell_type_pcl_ontology_term_id    PCL:0113148   ← only when PCL exact
+cluster--cell_type_pcl                     Sst Gaba_3 Chrnb3 ...
+cluster--cell_type_cl_broad_ontology_term_ids  CL:4023017|CL:4023069
+
+supertype--cell_type_ontology_term_id      CL:4023017
+supertype--cell_type                       sst GABAergic interneuron
+supertype--cell_type_pcl_ontology_term_id  PCL:0110786   ← only when PCL exact
+...
+
+subclass--cell_type_ontology_term_id       CL:4023017
+...
+
+class--cell_type_ontology_term_id          CL:4023069
+...
+```
+
+**Mapping strategy for `cell_type_ontology_term_id`:**
+
+| Exact match type | Value written | Source |
+|------------------|---------------|--------|
+| CL exact match | exact CL CURIE | Phase 1 |
 | PCL exact match with CL broad matches | highest-IC CL broad match | Phase 4 |
 | PCL exact match, no CL broad match | `CL:0000000` (cell) + warning | fallback |
 
 **Implementation:**
 
 1. Read h5ad with `anndata`.
-2. For each cell, look up the ABA taxonomy ID from a designated obs column (or run annotation inline).
-3. Write obs columns following the Phase 3 field naming schema:
-   - `cell_type_ontology_term_id` — best CL CURIE (required by CxG)
-   - `cell_type` — best CL label (required by CxG)
-   - `cell_type_pcl_ontology_term_id` / `cell_type_pcl` — only when exact match is PCL
-   - `cell_type_cl_broad_ontology_term_ids` — only when exact match is PCL
-4. For multi-taxonomy-level h5ad files, use CAP/HCA double-dash prefixed columns (e.g. `cluster--cell_type_ontology_term_id`) for non-primary levels.
-5. Validate the output against the CxG schema using the `cellxgene-schema` validator if available.
+2. For each cell, look up ABA taxonomy IDs from MapMyCells obs columns.
+3. Write the unprefixed CxG pair (`cell_type_ontology_term_id`, `cell_type`) using the cluster-level best CL.
+4. Write prefixed per-level columns for all taxonomy levels, including PCL and broad fields where applicable.
+5. Validate against the CxG schema with `cellxgene-schema` if available.
 6. Write annotated h5ad.
 
 **Dependency note:** Requires `anndata` (runtime) and optionally `cellxgene-schema` (validation). Both are optional extras to keep the base install light:
