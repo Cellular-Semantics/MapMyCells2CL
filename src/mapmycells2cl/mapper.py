@@ -18,49 +18,52 @@ _DEFAULT_MAPPING = Path(__file__).parent / "data" / "mapping.json"
 
 @dataclass(frozen=True)
 class BroadMatch:
-    """A single broad CL match for a PCL exact-match term.
-
-    Attributes:
-        id: CL CURIE, e.g. ``CL:4300353``.
-        label: Human-readable cell type name.
-        via: Intermediate PCL / ABA IDs traversed to reach this CL term.
-    """
+    """A single broad CL match for a PCL exact-match term."""
 
     id: str
+    """CL CURIE, e.g. ``CL:4300353``."""
+
     label: str
+    """Human-readable cell type name."""
+
     via: list[str] = field(default_factory=list)
+    """Intermediate PCL / ABA IDs traversed to reach this CL term."""
 
 
 @dataclass(frozen=True)
 class MatchResult:
-    """Result of a single ABA taxonomy ID lookup.
-
-    Attributes:
-        aba_id: The queried ABA taxonomy short ID.
-        exact_id: CL or PCL CURIE for the exact equivalentClass match.
-        exact_label: Human-readable label for the exact match.
-        ontology: ``"CL"`` or ``"PCL"``.
-        broad: CL broad matches (empty when exact match is already CL).
-        best_cl_id: Most specific CL CURIE (IC-ranked). Equal to ``exact_id``
-            when exact is CL; highest-IC broad match when exact is PCL.
-            Empty string when mapping was generated without IC data.
-        best_cl_label: Label for ``best_cl_id``.
-        best_cl_ic: Information Content score for ``best_cl_id`` (0.0 when
-            IC data is absent from the mapping).
-        mapping_version: Version of the mapping data used.
-        found: ``False`` when the ABA ID had no entry in the mapping.
-    """
+    """Result of a single ABA taxonomy ID lookup."""
 
     aba_id: str
+    """The queried ABA taxonomy short ID."""
+
     exact_id: str
+    """CL or PCL CURIE for the exact equivalentClass match."""
+
     exact_label: str
+    """Human-readable label for the exact match."""
+
     ontology: str
+    """``"CL"`` or ``"PCL"``."""
+
     broad: list[BroadMatch]
+    """CL broad matches (empty when exact match is already CL)."""
+
     best_cl_id: str
+    """Most specific CL CURIE (IC-ranked). Equal to ``exact_id`` when exact is CL;
+    highest-IC broad match when exact is PCL. Empty string without IC data."""
+
     best_cl_label: str
+    """Label for ``best_cl_id``."""
+
     best_cl_ic: float
+    """Information Content score for ``best_cl_id`` (0.0 when IC data is absent)."""
+
     mapping_version: str
+    """Version of the mapping data used."""
+
     found: bool = True
+    """``False`` when the ABA ID had no entry in the mapping."""
 
 
 class CellTypeMapper:

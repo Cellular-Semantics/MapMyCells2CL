@@ -26,3 +26,7 @@ pcl.owl
 # Pytest cache
 .pytest_cache/
 
+# Sphinx docs build output and generated AutoAPI source files
+docs/_build/
+docs/autoapi/
+

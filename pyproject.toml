@@ -22,6 +22,10 @@ dev = [
     "ruff>=0.5",
     "pre-commit>=3.7",
     "pandas-stubs>=3.0.0.260204",
+    "sphinx>=9.1.0",
+    "sphinx-autoapi>=3.8.0",
+    "myst-parser>=5.0.0",
+    "furo>=2025.12.19",
 ]
 
 [build-system]
