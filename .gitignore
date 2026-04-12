@@ -14,6 +14,7 @@ wheels/
 htmlcov/
 
 # Large OWL/ontology source files (use update-mappings to regenerate)
+cl.owl
 cl-full.owl
 cl-full.json
 pcl.owl
