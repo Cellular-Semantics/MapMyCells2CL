@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # Allow one concurrent deployment; cancel in-flight runs on new push to main
 concurrency:
   group: pages-${{ github.ref }}
