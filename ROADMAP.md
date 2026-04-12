@@ -154,9 +154,40 @@ Read MapMyCells CSV/JSON output and annotate with CL terms.
 **Annotator behaviour:**
 1. Parse MapMyCells output (CSV or JSON).
 2. For each cell, at each taxonomy level, look up the `{level}_label` value (e.g. `CS20230722_SUBC_313`).
-3. Add columns/fields: `{level}_cl_exact`, `{level}_cl_broad`, `{level}_cl_label`.
-4. For broad matches with multiple CL terms (polyhierarchy), join with `|` in CSV or use a list in JSON.
-5. Write annotated output in same format.
+3. Add columns/fields using the field naming schema below.
+4. Write annotated output in same format.
+
+**Field naming schema** — follows CxG standard field names, extended using
+CAP/HCA double-dash convention for multi-level CSV output:
+
+| Field | Content | When present |
+|-------|---------|--------------|
+| `cell_type_ontology_term_id` | Most specific CL CURIE (IC-ranked best, or CL exact if available) | Always |
+| `cell_type` | Label for above | Always |
+| `cell_type_pcl_ontology_term_id` | PCL exact match CURIE | Only when exact match is PCL (omitted when exact is already CL — adding it would be redundant and confusing) |
+| `cell_type_pcl` | PCL label | Only when exact match is PCL |
+| `cell_type_cl_broad_ontology_term_ids` | All CL broad CURIEs, `\|`-joined in CSV / list in JSON/h5ad | Only when exact match is PCL |
+
+For multi-level CSV (class / subclass / supertype / cluster), each field is
+prefixed with the level name and a double dash (CAP/HCA convention):
+
+```
+cluster--cell_type_ontology_term_id
+cluster--cell_type
+cluster--cell_type_pcl_ontology_term_id        ← only when PCL exact
+cluster--cell_type_pcl                         ← only when PCL exact
+cluster--cell_type_cl_broad_ontology_term_ids  ← only when PCL exact
+subclass--cell_type_ontology_term_id
+subclass--cell_type
+...
+```
+
+The h5ad / CxG single-level output uses the unprefixed names directly in `obs`.
+
+> **Note:** The initial MVP implementation used `{level}_cl_exact`, `{level}_cl_label`,
+> `{level}_cl_broad` as column names. These are superseded by the CAP/HCA schema
+> above and will be updated in the Phase 4 release (breaking change, before any
+> stable release).
 
 **CLI:**
 
@@ -191,11 +222,13 @@ PCL has two properties that distort IC calculations:
 
 CL alone gives a cleaner, more stable base for IC. PCL terms are then mapped to their CL ancestors for scoring.
 
-**Output additions:**
+**Output:** Phase 4 delivers the `cell_type_ontology_term_id` field defined in
+the Phase 3 schema — it was left as a placeholder in the MVP because IC
+selection was not yet implemented. Phase 4 completes that field and renames
+the legacy `{level}_cl_*` columns to the CAP/HCA double-dash convention.
 
-- `{level}_cl_best` — single most-specific CL CURIE by IC among the broad matches (or the exact match if already CL)
-- `{level}_cl_best_label` — label for the best term
-- `{level}_cl_best_ic` — IC score (optional, for transparency)
+The IC score is stored in `mapping.json` at generation time (pre-computed,
+version-locked) so no runtime CL dependency is needed.
 
 **Experiments to run (`experiments/`) before implementing:**
 
@@ -231,10 +264,15 @@ Add support for annotating h5ad files, with output that conforms to the [CELLxGE
 **Implementation:**
 
 1. Read h5ad with `anndata`.
-2. For each cell, look up the `{level}_label` value from an existing MapMyCells obs column (or run annotation inline).
-3. Write `cell_type_ontology_term_id` and `cell_type` to `obs`, selecting the best CL term per the table above.
-4. Validate the output against the CxG schema using the `cellxgene-schema` validator if available.
-5. Write annotated h5ad.
+2. For each cell, look up the ABA taxonomy ID from a designated obs column (or run annotation inline).
+3. Write obs columns following the Phase 3 field naming schema:
+   - `cell_type_ontology_term_id` — best CL CURIE (required by CxG)
+   - `cell_type` — best CL label (required by CxG)
+   - `cell_type_pcl_ontology_term_id` / `cell_type_pcl` — only when exact match is PCL
+   - `cell_type_cl_broad_ontology_term_ids` — only when exact match is PCL
+4. For multi-taxonomy-level h5ad files, use CAP/HCA double-dash prefixed columns (e.g. `cluster--cell_type_ontology_term_id`) for non-primary levels.
+5. Validate the output against the CxG schema using the `cellxgene-schema` validator if available.
+6. Write annotated h5ad.
 
 **Dependency note:** Requires `anndata` (runtime) and optionally `cellxgene-schema` (validation). Both are optional extras to keep the base install light:
 
